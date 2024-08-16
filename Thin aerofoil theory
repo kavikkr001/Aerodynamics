@@ -1,0 +1,192 @@
+"""
+numpy library is used inorder to perform trigonometric operations and also to use pi value
+matplotlib library is used mainly to plot graphs
+"""
+import numpy as np
+from matplotlib import pyplot as plt
+
+class NACA4DigitAirfoil:
+    def __init__(self, NACA_code):
+        self.NACA_code = NACA_code
+        self.m = float(NACA_code[0]) / 100 #m refers to maximum camber in percentage of chord
+        self.p = float(NACA_code[1]) / 10 #p refers to position of maximum camber in percentage of chord
+        self.t = float(NACA_code[2:]) / 100 #t refers to thickness in percentage of chord
+
+    def dzc_dx(self, theta):
+        dzc_dx = [] #An array is created to store dzc/dx values
+        if self.m !=0 and self.p!=0: #Condition to check whether the given airfoil is cambered airfoil
+          for i in theta:
+            if i <= self.p * np.pi: #The below equation is used till theta lessthan or equal to theta corresponding to maximum camber
+              value = (self.m * ((2 * self.p) - 1 + np.cos(i))) / self.p**2
+            else: #The below equation is used for remaining thetas
+                value = (self.m * ((2 * self.p) - 1 + np.cos(i))) / (1 - self.p)**2
+            dzc_dx.append(value)
+        else: #If the given airfoil is symmetric airfoil
+          for i in theta:
+            dzc_dx.append(0)
+        return dzc_dx
+
+class ThinAirfoilSolver:
+    def __init__(self, airfoil, AoA=0, nPts=100, nSrs=10):
+        self.airfoil = airfoil
+        self.AoA = np.radians(AoA) #Input AoA is converted to radians
+        self.nPts = nPts #Number of points used in discretizing chord
+        self.nSrs = nSrs #Number of non-zero fourier modes
+        self.theta = np.linspace(0, np.pi, nPts) #theta defined from 0 to pi, divided equally by means of nPts
+        self.x = 0.5 * (1 - np.cos(self.theta)) # conversion of x value with respect to theta
+        self.dtheta = np.pi / nPts
+        self.coeffs = self.calculate_camber_coefficients() #Number of An's
+
+    #Function to Calculate camber coefficients
+    def calculate_camber_coefficients(self):#This function is to calculate the values of An's starting from A0
+        self.An = [0.0] * (self.nSrs + 1) #An array is created in the size of nSrs+1 with all elements as zero, to accomodate An's
+        for n in range(self.nSrs + 1):
+            integrand = 0 #A temproary storage to store the sum, since integration done here as continuous addition
+            for i in range(self.nPts):
+                integrand += (self.airfoil.dzc_dx(self.theta)[i] * np.cos(n * self.theta[i]) * (np.pi / self.nPts))
+            if n == 0: #From equation 3, to find A0, the integrand is multiplied by -1/pi
+                self.An[n] = -1 * integrand / np.pi
+            else: #From equation 4, to find An, the integrand is multiplied by 2/pi
+                self.An[n] = 2 * integrand / np.pi
+        return self.An
+
+    #Function to calculate Circulation density
+    def calculate_circulation_density(self):
+        self.gamma = [0,] #An array is created to store gamma values. Since at x=0, gamma tends to infinity, so first element is stored as zero, which is not used.
+        for i in np.arange(np.pi / self.nPts, np.pi, np.pi / self.nPts):
+
+            sum = 0 #A temproary storage same as integrand
+            for n in range(1, self.nSrs + 1):
+                sum += self.An[n] * np.sin(n * i) #This is summation term of equation 6
+            self.gamma.append(2 * (((self.An[0] * (1 + np.cos(i))) / np.sin(i)) + sum) + (2 * self.AoA * (1 / np.tan(0.5 * i)))) #Adding equation 5 and 6
+        return self.gamma
+
+    #Function to calculate cl and cm_c/4
+    def calculate_cl_cm(self):
+        cl = (2 * np.pi * self.AoA) + ((2 * self.An[0]) + self.An[1]) * np.pi #Calculating cl using equation 7
+        cm_c4 = (-np.pi / 4) * (self.An[1] - self.An[2]) #calculating cm,c/4 using equation 8
+        return cl, cm_c4
+
+    #Function to estimate zc(x)
+    def calculate_camber(self):# This function forms a 2D array with element [i][j], where i is An's, n varying from 0 to n and j is theta
+        zclist = [] #2D array to store the elements
+        for n in range(len(self.An)):
+            zc = []#list to hold list of all theta for a specific An
+            for i in range(len(self.x)):
+                dth  = 0 #temproary variable to add theta
+                dzc = 0  #temproary vaiable to add zc
+                while dth <= self.theta[i]:
+                    if n == 0:
+                        dzc = dzc + (-1) * self.An[n] * np.cos(n*dth) * np.sin(dth) * (np.pi / self.nPts) #Equation 10
+                        dth = dth + (np.pi / self.nPts)
+                    else:
+                        dzc = dzc + self.An[n] * np.cos(n*dth) * np.sin(dth) * (np.pi / self.nPts) #Equation 10
+                        dth = dth + (np.pi / self.nPts)
+                zc.append(dzc*0.5) #from  equation 10, constant term (1/2) is multiplied
+            plt.figure()
+            plt.plot(self.x, zc) #For every An, plotting zc vs x
+            plt.xlabel('x')
+            plt.ylabel('zc')
+            plt.title(f'Camber vs. x/c for An = A{n}')
+
+            zclist.append(zc) #list zc for An is appended here, making it a 2D array
+
+        self.zcx = []
+        for j in range(len(self.x)):
+            zcx_ = 0
+            for i in range(len(self.An)):
+                zcx_ = zcx_ + zclist[i][j] #Adding contribution of A0 till An for every individual theta, to plot zc vs x
+            self.zcx.append(zcx_)
+
+        plt.scatter(self.x, self.zcx, s=3) #plotting zc(x) vs x
+        plt.ylim(0, 0.1)
+        plt.xlabel('Chord Fraction (x/c)')
+        plt.ylabel('Camber Line')
+        plt.title('Camber Line of NACA Airfoil')
+        plt.grid(True)
+        plt.show()
+
+
+    #Function to plot pressure co-efficient distribution
+    def plot_pressure_coefficient(self):
+        cpl = [] #list to store pressure co-efficient for upper surface
+        cpu = [] #list to store pressure co-efficient for lower surface
+        x_c = []
+
+        for i in np.arange(np.pi / self.nPts, np.pi, np.pi / self.nPts):
+            sum = 0
+            for n in range(1, self.nSrs + 1):
+                sum += self.An[n] * np.sin(n * i)
+            result = 2 * (((self.An[0] * (1 + np.cos(i))) / np.sin(i)) + sum) + (2 * self.AoA * (1 / np.tan(0.5 * i)))
+            cpl.append(result)
+            cpu.append(-1 * result)
+            x_c.append(0.5 * (1 - np.cos(i)))
+
+        fig, ax = plt.subplots()
+        ax.plot(x_c, cpu, label='Upper Surface')
+        ax.plot(x_c, cpl, label='Lower Surface')
+        ax.set_xlabel('Chord Fraction (x/c)')
+        ax.set_ylabel('Pressure Coefficient (Cp)')
+        ax.set_title('Pressure Coefficient Distribution')
+        plt.xlim(0, 1)
+        plt.ylim(-1.5, 1.5)
+        ax.legend()
+        plt.grid(True)
+        plt.show()
+
+    #Function to plot streamlines
+    def plot_streamlines(self, x_i, y_i, x_f, y_f):
+        y_ = y_i
+        plt.figure()
+
+        while y_ <= y_f: #Individual streamlines are plotted till then it reaches y_final
+            x, y = x_i, y_
+            dels = 0.01 #length of infinitesimal element 'ds' is taken as 0.01
+            l, r = [], [] #list 'l' and 'r' collects co-ordinates along x and y-axis to plot individual streamlines
+
+            while x <= x_f and y <= y_f:
+                l.append(x)
+                r.append(y)
+                u, v = np.cos(self.AoA), np.sin(self.AoA) #Here, u and v gives the free-stream velocity component of x and y axis
+                for i in range(len(self.x)):
+                    dV = 0 #dv is the variable to store the magnitude of velocity vector
+                    denom_ = 2 * np.pi * abs(np.sqrt((x - self.x[i])**2 + (y - self.zcx[i])**2)) #Denominator term of equation 13
+
+                    if i != 0 and i != len(self.x) - 1:
+                        dV = dV + (self.gamma[i] * ((self.x[i + 1] - self.x[i - 1]) / 2)) / denom_
+                    else:
+                        dV = dV + (self.gamma[i] * 0.01) / denom_ #magnitude of velocity vector at leading and trailing edge
+
+                    direction_ = np.arctan2((y - self.zcx[i]), (x - self.x[i])) #Direction calculated by equation 13
+                    u = u + dV * np.sin(direction_) #From velocity vector u component of velocity is calculated
+                    v = v + (-1) * dV * np.cos(direction_) #From velocity vector v component of velocity is calculated
+                #Using u and v, the next co-ordinate x and y
+                x = x + dels * np.cos(np.arctan2(v, u))
+                y = y + dels * np.sin(np.arctan2(v, u))
+                l.append(x)
+                r.append(y)
+
+            plt.plot(l, r, linewidth=1.0, color='black')#Plotting individual streamline
+            y_ = y_ + 0.1  #The initial point of y co-ordinate is incremented here. X-coordinate remains the same (In our case x_i = -3)
+
+
+        plt.plot(self.x, [0.0]*len(self.x), color='red', linewidth=1.0) #Plotting chord line
+        plt.title('Streamlines')
+        plt.ylim(-1,1)
+        plt.xlim(-2,2)
+        plt.show()
+
+"""
+The below code is to make a seperate driver routine to execute the program and to obtain the results.
+Here just by replacing the 4 digits (Here, 2412), the program can be executed for any  airfoil
+"""
+if __name__ == "__main__":
+    naca_airfoil = NACA4DigitAirfoil("2412")
+    airfoil_solver = ThinAirfoilSolver(naca_airfoil, AoA=6, nPts=100, nSrs=10)
+    cl, cm_c4 = airfoil_solver.calculate_cl_cm()
+    print("Sectional Lift Coefficient (cl): ", format(cl,'0.4f'))
+    print("Sectional Pitching Moment Coefficient (cm,c/4): ", format(cm_c4,'0.4f'))
+    airfoil_solver.calculate_camber()
+    gamma = airfoil_solver.calculate_circulation_density()
+    airfoil_solver.plot_streamlines(-3,-3,3,3)
+    airfoil_solver.plot_pressure_coefficient()
