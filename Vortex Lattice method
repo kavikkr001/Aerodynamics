@@ -1,0 +1,242 @@
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+
+
+def Lift(SwpCQrtr, TprRatio, AspctRatio, NLtcX, NLtcY):
+    # Convert sweep angle from degrees to radians
+    SwpRad = math.radians(SwpCQrtr)
+
+    b = 1  # span of the wing
+    U = 10  # free stream velocity
+    aoa = 5  # angle of attack
+    AoA = math.radians(aoa)  # conveting angle of attack from degrees to radians
+
+    """creating a 2D array of zeros to store chord
+    lengths at spanwise location"""
+    chord_y = np.zeros(NLtcY + 1)
+    for i in range(0, NLtcY + 1):
+        chord_y[i] = ((2 * b / ((1 + TprRatio) * AspctRatio)) * (1 - (1 - TprRatio) * (2 * i * 0.5 * b / NLtcY) / b))
+        # calculating chord at each spanwise location
+
+    """creating a 2D array of zeros to store distance
+    from y-axis to leading edge at spanwise location"""
+    LE_dist = np.zeros(NLtcY + 1)
+    for i in range(0, NLtcY + 1):
+        LE_dist[i] = (i * 0.5 * b * np.tan(SwpRad) / NLtcY)
+
+    """creating a 2D array of zeros to store the x-coordinates of
+    left-most points of the starboard bound vortices """
+    x_1n_strb = np.zeros((NLtcX, NLtcY))
+    for i in range(0, NLtcX):
+        for j in range(0, NLtcY):
+            x_1n_strb[i][j] = (i + 0.25) * chord_y[j] / NLtcX + LE_dist[j]
+
+    """creating a 2D array of zeros to store the x-coordinates of
+    right-most points of the starboard bound vortices """
+    x_2n_strb = np.zeros((NLtcX, NLtcY))
+    for i in range(0, NLtcX):
+        for j in range(0, NLtcY):
+            x_2n_strb[i][j] = (i + 0.25) * chord_y[j + 1] / NLtcX + LE_dist[j + 1]
+
+    """creating 2D arrays of left-most and right-most x-coordinates of port wing
+    bound vortices"""
+    x_1n_port = x_2n_strb
+    x_2n_port = x_1n_strb
+
+    """y-coordinates of the left-most points of starboard bound vortices"""
+    y_1n_strb = np.zeros((NLtcX, NLtcY))
+    for i in range(0, NLtcX):  # for every row
+        for j in range(0, NLtcY):  # for every panel in the row
+            y_1n_strb[i][j] = (j * 0.5 * b / NLtcY)
+
+    """y-coordinates of the right-most points of starboard bound vortices"""
+    y_2n_strb = np.zeros((NLtcX, NLtcY))
+    for i in range(0, NLtcX):
+        for j in range(0, NLtcY):
+            y_2n_strb[i][j] = ((j + 1) * 0.5 * b / NLtcY)
+
+    """creating 2D arrays of left-most and right-most y-coordinates of port wing
+    bound vortices"""
+    y_1n_port = -(y_2n_strb)
+    y_2n_port = -(y_1n_strb)
+
+    """creating 1D arrays for storing the mean chordwise length for every panel
+    and the corresponding distance to the LE from the y-axis"""
+    LE_dist_m = np.zeros(NLtcY)
+    chord_y_m = np.zeros(NLtcY)
+    for i in range(0, NLtcY):
+        LE_dist_m[i] = (0.5 * (LE_dist[i] + LE_dist[i + 1]))
+        chord_y_m[i] = (0.5 * (chord_y[i] + chord_y[i + 1]))  # average chord length for the panel
+
+    """creating a 2D array to store the x-coordinates of the control points
+    at each panel"""
+    x_m = np.zeros((NLtcX, NLtcY))
+    for i in range(NLtcX):
+        for j in range(NLtcY):
+            x_m[i][j] = LE_dist_m[j] + (i + 0.75) * chord_y_m[j] / NLtcX
+
+    """creating a 2D array to store the y-coordinates of the control points
+    at each panel"""
+    y_m = np.zeros((NLtcX, NLtcY))
+    y_half = 0.5 * (0.5 * b / NLtcY)  # half-width of the panels
+    for i in range(0, NLtcX):
+        for j in range(0, NLtcY):
+            y_m[i][j] = (y_half + y_1n_strb[i][j])
+
+    """creating the constant matrix of the system of linear equations"""
+    B = np.zeros(NLtcY)
+    for i in range(0, NLtcX):
+        B += -4 * np.pi * b * U * AoA
+
+    """Creating 2D zero arrays for solution matrix and the coefficient matrix"""
+    Gamma_solutions = np.zeros((NLtcX, NLtcY)) #2D array to store the circulation solutions
+    Gamma_coeffs = np.zeros((NLtcY, NLtcY)) #matrix A in AX = B
+
+    for i in range(0, NLtcX):  # i --- row number in chordwise direction
+
+        for m in range(0, NLtcY):  # m --- panel number in spanwise location
+
+            for n in range(0, NLtcY):
+                """dividing the terms of downwash formula into 5 parts for both starboard and port wings and
+                generating the coefficient matrix"""
+                p_strb = 1 / ((x_m[i][m] - x_1n_strb[i][n]) * (y_m[i][m] - y_2n_strb[i][n]) - (
+                            x_m[i][m] - x_2n_strb[i][n]) * (y_m[i][m] - y_1n_strb[i][n]))
+                q_strb_1 = ((x_2n_strb[i][n] - x_1n_strb[i][n]) * (x_m[i][m] - x_1n_strb[i][n]) + (
+                            y_2n_strb[i][n] - y_1n_strb[i][n]) * (y_m[i][m] - y_1n_strb[i][n]))
+                q_strb_2 = math.sqrt((x_m[i][m] - x_1n_strb[i][n]) ** 2 + (y_m[i][m] - y_1n_strb[i][n]) ** 2)
+                q_strb = q_strb_1 / q_strb_2
+                r_strb_1 = ((x_2n_strb[i][n] - x_1n_strb[i][n]) * (x_m[i][m] - x_2n_strb[i][n]) + (
+                            y_2n_strb[i][n] - y_1n_strb[i][n]) * (y_m[i][m] - y_2n_strb[i][n]))
+                r_strb_2 = math.sqrt((x_m[i][m] - x_2n_strb[i][n]) ** 2 + (y_m[i][m] - y_2n_strb[i][n]) ** 2)
+                r_strb = r_strb_1 / r_strb_2
+                s_strb = (1 / (y_1n_strb[i][n] - y_m[i][m])) * (1 + (x_m[i][m] - x_1n_strb[i][n]) / (
+                    math.sqrt((x_m[i][m] - x_1n_strb[i][n]) ** 2 + (y_m[i][m] - y_1n_strb[i][n]) ** 2)))
+                t_strb = (1 / (y_2n_strb[i][n] - y_m[i][m])) * (1 + (x_m[i][m] - x_2n_strb[i][n]) / (
+                    math.sqrt((x_m[i][m] - x_2n_strb[i][n]) ** 2 + (y_m[i][m] - y_2n_strb[i][n]) ** 2)))
+
+                p_port = 1 / ((x_m[i][m] - x_1n_port[i][n]) * (y_m[i][m] - y_2n_port[i][n]) - (
+                            x_m[i][m] - x_2n_port[i][n]) * (y_m[i][m] - y_1n_port[i][n]))
+                q_port_1 = ((x_2n_port[i][n] - x_1n_port[i][n]) * (x_m[i][m] - x_1n_port[i][n]) + (
+                            y_2n_port[i][n] - y_1n_port[i][n]) * (y_m[i][m] - y_1n_port[i][n]))
+                q_port_2 = math.sqrt((x_m[i][m] - x_1n_port[i][n]) ** 2 + (y_m[i][m] - y_1n_port[i][n]) ** 2)
+                q_port = q_port_1 / q_port_2
+                r_port_1 = ((x_2n_port[i][n] - x_1n_port[i][n]) * (x_m[i][m] - x_2n_port[i][n]) + (
+                            y_2n_port[i][n] - y_1n_port[i][n]) * (y_m[i][m] - y_2n_port[i][n]))
+                r_port_2 = math.sqrt((x_m[i][m] - x_2n_port[i][n]) ** 2 + (y_m[i][m] - y_2n_port[i][n]) ** 2)
+                r_port = r_port_1 / r_port_2
+                s_port = (1 / (y_1n_port[i][n] - y_m[i][m])) * (1 + (x_m[i][m] - x_1n_port[i][n]) / (
+                    math.sqrt((x_m[i][m] - x_1n_port[i][n]) ** 2 + (y_m[i][m] - y_1n_port[i][n]) ** 2)))
+                t_port = (1 / (y_2n_port[i][n] - y_m[i][m])) * (1 + (x_m[i][m] - x_2n_port[i][n]) / (
+                    math.sqrt((x_m[i][m] - x_2n_port[i][n]) ** 2 + (y_m[i][m] - y_2n_port[i][n]) ** 2)))
+
+                Gamma_coeff_strb = p_strb * (q_strb - r_strb) + s_strb - t_strb
+                Gamma_coeff_port = p_port * (q_port - r_port) + s_port - t_port
+                Gamma_coeffs[m][n] = Gamma_coeff_strb + Gamma_coeff_port  # appending the calculated value to the coefficient matrix
+
+        """Solving the system of equations and converting the column matrix to row matrix using ravel()"""
+        Gamma = np.array(np.linalg.solve(Gamma_coeffs, B)).ravel()
+        Gamma_solutions[i] = Gamma  # appending the row matrix to the array of Solution matrix
+
+    c_avg = b / AspctRatio  # average chord
+
+    Gamma_chrdwise = np.transpose(Gamma_solutions)
+
+    """Calculating lift coefficient: The lift coeffients in are found using Kutta Jowkousky theorem, by adding the circulation
+    densities in the chordwise position, hence finding lift coefficients for every column and taking the average"""
+    Cl_nvalues = np.zeros(NLtcY)
+    for i in range(0, NLtcY):
+        Cl_nvalues[i] = (2 / (U * c_avg)) * sum(Gamma_chrdwise[i])
+
+    Lift_Coeff = sum(Cl_nvalues) / NLtcY  # Lift coefficient of the wing
+
+    dcL_da = Lift_Coeff / aoa
+
+    return Lift_Coeff
+
+cL = Lift(45, 1, 5, 1, 4)
+print(f'The lift coefficient of the wing is {cL}')
+
+"""Example 7.4:
+
+To find: Lift Coefficient
+Given: Aspect Ratio = 5
+Taper Ratio = 1
+Sweep Angle = 45° (Backward Swept)"""
+cL = Lift(45, 1, 5, 1, 4)
+print(f'The lift coefficient of the wing is {cL}')
+
+"""Problem 7.9:
+To find: Lift Coefficient
+Given: Aspect Ratio = 8
+Taper Ratio = 1
+Sweep Angle = 45° (Backward Swept)"""
+
+cL = Lift(45, 1, 8, 1, 4)
+print(f'The lift coefficient of the wing is {cL}')
+print('''> The lift coefficient found in this question is larger than the one found in the
+previous one.
+> This indicates that an increase in aspect ratio(from 5 to 8) leads to an
+increase in the lift coefficient of the wing for a given angle of attack.
+> This is in consistent with our knowledge of the effect of aspect ratio on the lift curve.''')
+
+"""Problem 7.10:
+To find: Lift Coefficient
+Given: Aspect Ratio = 3.55
+Taper Ratio = 0.5
+Sweep Angle = -45° (Forward Swept)"""
+
+Cl = Lift(-45, 0.5, 3.55, 2, 4)
+print(f'The lift coefficient of the wing is {Cl}\n')
+
+def plot():
+
+  m = 6.09 * np.pi /180  # slope
+  a_0 = -0.94
+  b = -m * a_0
+
+  Cl_Margason = [0, 0.6]
+  a = [0, 12]
+
+  # Generate x values
+  aoa = np.linspace(-2, 10, 12)
+
+  # Calculate corresponding y values
+  Cl = m * aoa + b
+
+  # Create the plot
+  plt.figure(figsize=(6, 4.5))
+  plt.plot(aoa, Cl, label='Plot obtained from the solution', color='blue')
+  plt.plot(a, Cl_Margason, label='Margason(1985)', color='red')
+  plt.title('Lift slope curve')
+  plt.xlabel('Angle of Attack')
+  plt.ylabel('Lift Coefficient')
+  plt.legend()
+  plt.grid(True)
+  plt.show()
+
+
+plot()
+
+"""Problem 7.12:
+To find: Sweep Angle of the Delta wing
+Given: Aspect Ratio = 1.5
+Taper Ratio = 0"""
+
+b = 1
+AspctRatio = 1.5
+TprRatio = 0
+
+c_root = 2*b/((1+TprRatio)*AspctRatio)
+
+Sweep_Angle = np.arctan(c_root/(0.5 * b))
+Sweep_Angle_deg = Sweep_Angle * 180 / np.pi
+print(f'> The Sweep Angle of the Delta wing is {Sweep_Angle_deg} degrees\n')
+
+Cl = Lift(Sweep_Angle_deg, 0, 1.5, 3, 4)
+print(f'> The lift coefficient of the delta wing is {Cl}')
+print('''When the values of lift coefficients found using this code and the values
+given in figure 7.44 were compared, it was found that the Lift coefficient for the
+delta wing in figure 7.44 is around 0.2 for the same angle of attack (5 degrees) and
+the same aspect ratio (1.5), which is lesser than the one computed from this
+code''')
